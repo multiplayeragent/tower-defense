@@ -1,0 +1,21 @@
+{
+  "name": "Tower Defense",
+  "genre": "strategy",
+  "dim": "3D",
+  "mode": "Co-op",
+  "players": "1–4",
+  "hook": "Build towers together. Hold the path.",
+  "how": "Enemies walk the path in waves. Spend the team's shared gold on archers, cannons, frost and spark towers, and upgrade them. Lose 20 lives and the castle falls.",
+  "controls": "Pick a tower, then click or tap a tile. Click a tower to upgrade or sell it",
+  "uses": [
+    ["Host-run rules", "The host's browser moves the enemies, runs the waves and keeps the shared gold; if it leaves, the next player takes over."],
+    ["Leaderboard", "The furthest wave your team reached."],
+    ["Bots", "AI builders place and upgrade towers until enough people join."],
+    ["Live sync", "Everyone sees each other's cursors, towers and shots as they happen."]
+  ],
+  "ideas": [
+    "Add a flying enemy that skips the path",
+    "Add a poison tower that hurts enemies over time",
+    "Add a second map with two paths"
+  ]
+}

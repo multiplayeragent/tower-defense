@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tower Defense</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #a8dcea; }
+  body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; touch-action: none; }
+  .hud { position: fixed; pointer-events: none; text-shadow: 0 2px 4px #0008; font-weight: 800; }
+  #stats { top: max(12px, env(safe-area-inset-top)); left: max(14px, env(safe-area-inset-left)); display: flex; gap: 14px; font-size: 21px; }
+  #stats .h { color: #ff6b6b; } #stats .g { color: #ffd23f; }
+  #net { top: calc(max(12px, env(safe-area-inset-top)) + 32px); left: max(14px, env(safe-area-inset-left)); font-size: 12px; font-weight: 600; opacity: .85; }
+  #team { top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); font-size: 13px; text-align: right; }
+  #team i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-left: 6px; vertical-align: -1px; }
+  #wave { top: max(12px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); font-size: 18px; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+  #wave button { pointer-events: auto; min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: #ffd23f; color: #3a2400; font: 800 15px system-ui, sans-serif; cursor: pointer; box-shadow: 0 3px 0 #0004; }
+  #wave button[hidden] { display: none; }
+  #banner { inset: 0; display: grid; place-items: center; font-size: min(14vw, 96px); color: #fff; -webkit-text-stroke: 3px #2b3a55; opacity: 0; transition: opacity .3s; }
+  #hint { top: 22%; left: 50%; transform: translateX(-50%); width: min(420px, 86vw); text-align: center; font-size: 16px; padding: 10px 14px; border-radius: 14px; background: #1b2a40aa; transition: opacity .5s; }
+  #toast { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 150px); left: 50%; transform: translateX(-50%); font-size: 16px; color: #ffd23f; opacity: 0; transition: opacity .3s; }
+  .pop { position: fixed; left: 0; top: 0; pointer-events: none; font-weight: 800; font-size: 16px; text-shadow: 0 2px 3px #000a; will-change: transform; }
+  #bar { position: fixed; bottom: max(10px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
+  #bar button { width: min(100px, 22vw); height: 66px; border-radius: 14px; border: 2px solid #ffffff55; background: #1b2a40cc; color: #fff; font: 700 13px system-ui, sans-serif; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; touch-action: manipulation; }
+  #bar button i { width: 18px; height: 18px; border-radius: 6px; box-shadow: inset 0 -3px 0 #0003; }
+  #bar button small { color: #ffd23f; font-size: 12px; }
+  #bar button.on { border-color: #ffd23f; background: #2c4466ee; transform: translateY(-3px); }
+  #bar button.poor { opacity: .5; }
+  #sel { position: fixed; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 76px); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border-radius: 14px; background: #1b2a40ee; font-weight: 700; white-space: nowrap; }
+  #sel button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; font: 800 14px system-ui, sans-serif; cursor: pointer; }
+  #up { background: #52d273; color: #06240f; } #sell { background: #ff8c42; color: #2b1200; } #up:disabled { opacity: .45; }
+  #sel[hidden], #over[hidden], #bar[hidden] { display: none; }
+  #over { position: fixed; inset: 0; display: grid; place-items: center; background: #0007; }
+  .card { width: min(360px, 88vw); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #1b2a40; border: 1px solid #ffffff2a; text-align: center; }
+  .card h2 { margin: 0 0 4px; font-size: 22px; } .card h3 { margin: 14px 0 4px; font-size: 14px; color: #ffd23f; }
+  .card ol { text-align: left; margin: 0 0 14px; padding-left: 26px; font-size: 14px; }
+  .card li span { float: right; } .card p { margin: 6px 0; font-size: 14px; opacity: .85; }
+  button.go { width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: #52d273; color: #06240f; font: 800 17px system-ui, sans-serif; cursor: pointer; }
+  @media (max-width: 640px) { #wave { left: max(14px, env(safe-area-inset-left)); transform: none; top: calc(max(12px, env(safe-area-inset-top)) + 52px); font-size: 16px; } #stats { font-size: 18px; } }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+<script type="importmap">{ "imports": { "three": "./libs/three.module.min.js" } }</script>
+</head>
+<body>
+<div class="hud" id="stats"><span id="sWave"></span><span class="h" id="sLives"></span><span class="g" id="sGold"></span></div>
+<div class="hud" id="net">Connecting…</div>
+<div class="hud" id="team"></div>
+<div class="hud" id="wave"><span id="waveTxt"></span><button id="go" hidden>Send now</button></div>
+<div class="hud" id="banner"></div>
+<div class="hud" id="hint"></div>
+<div class="hud" id="toast"></div>
+<div id="sel" hidden><span id="selName"></span><button id="up"></button><button id="sell"></button></div>
+<div id="bar"></div>
+<div id="over" hidden><div class="card">
+  <h2 id="overTitle"></h2><p id="overSub"></p>
+  <h3>Furthest waves</h3><ol id="board"><li>Loading…</li></ol>
+  <button class="go" id="again">Play again</button><p id="overNext"></p>
+</div></div>
+<script type="module">
+/* ═══ TOWER DEFENSE · a Multiplayer Agent starter ═══════════════════════════════════════
+ * Build towers together. Hold the path. Co-op, 1–4 players; AI builders fill empty seats.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ the board and path, gold, lives, waves, every tower and enemy type
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host
+ *   BOARD ......... the path maths, the ground, trees, the portal and the castle
+ *   MODELS ........ towers, enemies, builder drones, shots, particles
+ *   GAME (HOST) ... waves, enemies walking, lives, shared gold, build/upgrade/sell, the
+ *                   AI builders. Only the host runs this and writes shared state.
+ *   VIEW .......... turning state into towers, enemies and shots on screen
+ *   HUD & RESULTS . stats, wave timer, tower bar, results and the leaderboard
+ *   INPUT ......... mouse, touch, keyboard
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code):
+ *   - The HOST is the lowest sessionId among live players (heartbeat `hb` seen in the
+ *     last 3s), worked out every frame. The host's browser runs the whole simulation.
+ *   - The host writes four shared fields: `game` (id, v, phase, wave, lives, gold, timers:
+ *     ONE JSON field, `v` goes up on every write), `towers` (every tower: tile, type,
+ *     level, builder color), `enemies` (wave + each enemy's progress and hp, ~8/s) and
+ *     `bots` (the AI builders' cursors). A new host adopts all four and carries on.
+ *   - Each player writes its OWN entity: `cur` (the tile it points at and its tower
+ *     type, ~10/s), `n`/`c` (name, color) once and `hb` once a second.
+ *   - Players send intents to the host: "build" {x, y, t}, "upgrade" {x, y},
+ *     "sell" {x, y}, "go" (start the wave now) and "again" (new game). The host checks
+ *     the gold and the tile, then writes the result. Its own clicks apply directly.
+ *   - Shots are drawn by every client from the synced towers and enemies; only the
+ *     host's shots do damage.
+ *   - ?attract plays offline with AI builders only (the preview video is recorded from it).
+ *   - Leaderboard "wave-reached": the wave your team reached, shown on the results card.
+ */
+import * as THREE from "three";
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  cols: 14, rows: 9,     // the board, in tiles
+  tile: 2,               // world units per tile
+  // The path: tile waypoints joined by straight lines (off the board at both ends).
+  path: [[-1, 1], [3, 1], [3, 6], [7, 6], [7, 2], [11, 2], [11, 7], [14, 7]],
+  lives: 20,
+  startGold: 180,
+  firstWaveMs: 15000,    // build time before wave 1
+  betweenMs: 9000,       // build time between waves
+  resultsMs: 25000,      // the results show this long, then a new game starts
+  waveBonus: 25,         // gold for clearing a wave (plus 5 per wave number)
+  hpGrowth: 0.3,         // enemy hp grows 30% per wave...
+  hpCurve: 0.03,         // ...plus a little more every wave after that
+  sellBack: 0.7,         // selling gives back this share of what the tower cost
+  seats: 3,              // AI builders fill the team up to this many builders
+  botReserve: 60,        // gold the AI builders leave for each human player
+  board: "wave-reached",
+  // Towers. range in tiles, every = seconds between shots. splash, slow and chain are optional.
+  towers: [
+    { name: "Archer", cost: 50,  range: 2.6, every: 0.55, dmg: 11, color: "#c98a4b" },
+    { name: "Cannon", cost: 90,  range: 2.2, every: 1.5,  dmg: 34, splash: 1.1, color: "#6b7a8c" },
+    { name: "Frost",  cost: 70,  range: 2.1, every: 1.0,  dmg: 5,  slow: 0.5, slowFor: 1.6, color: "#5fd3f3" },
+    { name: "Spark",  cost: 130, range: 3.1, every: 1.1,  dmg: 26, chain: 2, color: "#b57cff" },
+  ],
+  upgrade: { cost: [0.8, 1.3], dmg: 1.6, range: 0.35 }, // level 2 and 3: share of the base cost, ×damage, +range
+  // Enemies. speed in tiles/s, gap = seconds before the next one spawns, lives = lost on reaching the castle.
+  enemies: [
+    { name: "Grunt",  hp: 55,   speed: 1.35, gold: 6,  gap: 0.85, size: 0.55, color: "#e2574c" },
+    { name: "Runner", hp: 28,   speed: 2.3,  gold: 4,  gap: 0.45, size: 0.42, color: "#f2c14e" },
+    { name: "Tank",   hp: 210,  speed: 0.8,  gold: 14, gap: 1.4,  size: 0.8,  color: "#7d5ba6" },
+    { name: "Boss",   hp: 1100, speed: 0.6,  gold: 70, gap: 2.0,  size: 1.15, color: "#34405a", lives: 5 },
+  ],
+};
+/** The enemies of wave n, in spawn order (enemy type numbers). No randomness, so a new host continues it exactly. */
+function waveSpec(n) {
+  const out = [], count = Math.min(34, 5 + n * 2);
+  for (let i = 0; i < count; i++) {
+    let t = 0;
+    if (n >= 2 && i % 3 === 1) t = 1;          // runners from wave 2
+    if (n >= 4 && i % 5 === 4) t = 2;          // tanks from wave 4
+    if (n % 3 === 0 && i >= count - 4) t = 1;  // every third wave ends in a rush
+    out.push(t);
+  }
+  if (n % 5 === 0) out.push(3);                // a boss every fifth wave
+  return out;
+}
+const BOT_NAMES = ["Mason", "Tinker", "Rivet", "Gizmo", "Pebble", "Bolt"];
+const COLORS = ["#ff5a5a", "#4da6ff", "#ffd23f", "#52d273", "#c77dff", "#ff8c42", "#ff6fb5", "#3de0d0"];
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'tower-defense',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const ATTRACT = new URLSearchParams(location.search).has("attract");
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true,
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+let net = null, S = { entities: { players: {} }, shared: {} };
+const memo = new Map();
+/** A shared JSON field, parsed once per change (read-only: never mutate what this returns). */
+function shared(key, fallback, map = (v) => v) {
+  const raw = S.shared[key], m = memo.get(key);
+  if (m && m.raw === raw) return m.v;
+  const v = map(parse(raw, fallback));
+  memo.set(key, { raw, v, at: performance.now() });
+  return v;
+}
+const seenHb = new Map();
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+const isHost = () => livePlayers()[0] === net.sessionId;
+const humans = () => livePlayers().filter((id) => !(ATTRACT && id === net.sessionId));
+
+// ── BOARD ───────────────────────────────────────────────────────────────────────────
+const COLS = CONFIG.cols, ROWS = CONFIG.rows, TL = CONFIG.tile;
+const cellX = (cx) => (cx - COLS / 2 + 0.5) * TL, cellZ = (cy) => (cy - ROWS / 2 + 0.5) * TL;
+const toCell = (x, z) => ({ cx: Math.floor(x / TL + COLS / 2), cy: Math.floor(z / TL + ROWS / 2) });
+const inBoard = (cx, cy) => cx >= 0 && cy >= 0 && cx < COLS && cy < ROWS;
+const WP = CONFIG.path.map(([cx, cy]) => ({ x: cellX(cx), z: cellZ(cy) }));
+const SEGS = [];
+let PATH_LEN = 0; // in tiles
+for (let i = 0; i < WP.length - 1; i++) { const a = WP[i], b = WP[i + 1], len = Math.hypot(b.x - a.x, b.z - a.z) / TL; SEGS.push({ a, b, len, from: PATH_LEN }); PATH_LEN += len; }
+/** Where something `d` tiles along the path is, and which way it faces. */
+function pathPos(d) {
+  const s = SEGS.find((s) => d <= s.from + s.len) || SEGS[SEGS.length - 1], f = Math.max(0, Math.min(1, (d - s.from) / s.len));
+  return { x: s.a.x + (s.b.x - s.a.x) * f, z: s.a.z + (s.b.z - s.a.z) * f, h: Math.atan2(s.b.x - s.a.x, s.b.z - s.a.z) };
+}
+const PATH_CELLS = new Set();
+for (let i = 0; i < CONFIG.path.length - 1; i++) {
+  let [x, y] = CONFIG.path[i]; const [x2, y2] = CONFIG.path[i + 1];
+  for (;;) { if (inBoard(x, y)) PATH_CELLS.add(x + "," + y); if (x === x2 && y === y2) break; x += Math.sign(x2 - x); y += Math.sign(y2 - y); }
+}
+const SAMPLES = Array.from({ length: Math.ceil(PATH_LEN * 4) }, (_, i) => pathPos(i / 4));
+/** How much of the path a tower on (cx, cy) with range r (tiles) can reach: the AI builders' favourite number. */
+const coverage = (cx, cy, r) => SAMPLES.filter((p) => Math.hypot(p.x - cellX(cx), p.z - cellZ(cy)) <= r * TL).length;
+function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color("#a8dcea");
+scene.fog = new THREE.Fog("#a8dcea", 70, 150);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 300);
+scene.add(new THREE.HemisphereLight("#ffffff", "#5a7a4a", 1.5));
+const sun = new THREE.DirectionalLight("#fff1d6", 1.7); sun.position.set(-20, 40, 18); scene.add(sun);
+function canvasTex(w, h, paint) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; paint(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+const PX = 64; // ground texture pixels per tile
+const groundTex = canvasTex(COLS * PX, ROWS * PX, (c, w, h) => {
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { c.fillStyle = (x + y) % 2 ? "#86c95f" : "#7dc057"; c.fillRect(x * PX, y * PX, PX, PX); }
+  c.strokeStyle = "#ffffff16"; c.lineWidth = 2; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) c.strokeRect(x * PX + 2, y * PX + 2, PX - 4, PX - 4);
+  const pts = CONFIG.path.map(([x, y]) => [(x + 0.5) * PX, (y + 0.5) * PX]), line = () => { c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); };
+  c.lineCap = c.lineJoin = "round";
+  line(); c.strokeStyle = "#b99a62"; c.lineWidth = PX * 0.98; c.stroke();
+  line(); c.strokeStyle = "#ead39f"; c.lineWidth = PX * 0.84; c.stroke();
+  const r = mulberry32(3);
+  for (let i = 0; i < 900; i++) { const x = r() * w, y = r() * h, onPath = PATH_CELLS.has(Math.floor(x / PX) + "," + Math.floor(y / PX)); c.fillStyle = onPath ? "#d4b981" : "#6aa94a"; c.fillRect(x, y, onPath ? 5 : 2, onPath ? 3 : 6); }
+});
+const board = new THREE.Mesh(new THREE.PlaneGeometry(COLS * TL, ROWS * TL), new THREE.MeshStandardMaterial({ map: groundTex, roughness: 1 }));
+board.rotation.x = -Math.PI / 2; board.position.y = 0.01; scene.add(board);
+const dirt = new THREE.MeshStandardMaterial({ color: "#8a5a3b", roughness: 1 }), turf = new THREE.MeshStandardMaterial({ color: "#6fb352", roughness: 1 });
+const slab = new THREE.Mesh(new THREE.BoxGeometry((COLS + 3) * TL, 2, (ROWS + 3) * TL), [dirt, dirt, turf, dirt, dirt, dirt]);
+slab.position.y = -1; scene.add(slab);
+// Trees and rocks on the rim (seeded, so everyone sees the same ones)
+const rim = mulberry32(11), trees = new THREE.InstancedMesh(new THREE.ConeGeometry(0.9, 2.4, 7), new THREE.MeshStandardMaterial({ color: "#2f8a3e", flatShading: true }), 40);
+const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.5), new THREE.MeshStandardMaterial({ color: "#9aa0a6", flatShading: true }), 20);
+const mtx = new THREE.Matrix4(), q0 = new THREE.Quaternion();
+for (let i = 0, nt = 0, nr = 0; i < 400 && (nt < 40 || nr < 20); i++) {
+  const x = (rim() - 0.5) * (COLS + 2.6) * TL, z = (rim() - 0.5) * (ROWS + 2.6) * TL, c = toCell(x, z);
+  if (inBoard(c.cx, c.cy) || SAMPLES.some((p) => Math.hypot(p.x - x, p.z - z) < 2.6) || Math.hypot(x - WP.at(-1).x, z - WP.at(-1).z) < 4) continue;
+  const s = 0.7 + rim() * 0.6;
+  if (nt < 40) { mtx.compose(new THREE.Vector3(x, 1.2 * s, z), q0, new THREE.Vector3(s, s, s)); trees.setMatrixAt(nt++, mtx); }
+  else if (nr < 20) { mtx.compose(new THREE.Vector3(x, 0.2, z), q0, new THREE.Vector3(s, s * 0.7, s)); rocks.setMatrixAt(nr++, mtx); }
+}
+scene.add(trees, rocks);
+// The portal the enemies come out of, and the castle they walk to
+const portal = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.35, 10, 28), new THREE.MeshStandardMaterial({ color: "#7a3cff", emissive: "#5a1fd0", emissiveIntensity: 0.8 }));
+portal.position.set(WP[0].x + 0.6, 1.4, WP[0].z); portal.rotation.y = Math.PI / 2; scene.add(portal);
+const portalCore = new THREE.Mesh(new THREE.CircleGeometry(1.2, 24), new THREE.MeshBasicMaterial({ color: "#1a0838" }));
+portalCore.position.copy(portal.position); portalCore.rotation.y = Math.PI / 2; scene.add(portalCore);
+const castleMat = new THREE.MeshStandardMaterial({ color: "#e8e4dc", flatShading: true }), roofMat = new THREE.MeshStandardMaterial({ color: "#3d6fd6", flatShading: true });
+const castle = new THREE.Group();
+mesh(new THREE.BoxGeometry(2.2, 2, 2.6), castleMat, 0, 1, 0, castle);
+for (const z of [-1.4, 1.4]) { mesh(new THREE.CylinderGeometry(0.6, 0.7, 3, 8), castleMat, 0, 1.5, z, castle); mesh(new THREE.ConeGeometry(0.85, 1.3, 8), roofMat, 0, 3.6, z, castle); }
+castle.position.set(WP.at(-1).x + 0.4, 0, WP.at(-1).z); scene.add(castle);
+
+// ── MODELS ──────────────────────────────────────────────────────────────────────────
+const G = {
+  foot: new THREE.CylinderGeometry(0.8, 0.9, 0.4, 6), band: new THREE.CylinderGeometry(0.84, 0.84, 0.12, 6),
+  post: new THREE.CylinderGeometry(0.42, 0.55, 1.1, 8), deck: new THREE.BoxGeometry(1.0, 0.18, 1.0),
+  stock: new THREE.BoxGeometry(0.18, 0.18, 0.9), bow: new THREE.BoxGeometry(1.0, 0.1, 0.12),
+  drum: new THREE.CylinderGeometry(0.62, 0.7, 0.6, 10), ball: new THREE.SphereGeometry(0.42, 14, 10),
+  barrel: new THREE.CylinderGeometry(0.17, 0.21, 0.95, 10).rotateX(Math.PI / 2).translate(0, 0, 0.45),
+  pillar: new THREE.CylinderGeometry(0.3, 0.45, 1.2, 6), crystal: new THREE.OctahedronGeometry(0.45),
+  spire: new THREE.CylinderGeometry(0.25, 0.55, 1.6, 8), orb: new THREE.SphereGeometry(0.32, 14, 10), halo: new THREE.TorusGeometry(0.52, 0.05, 6, 24),
+  pip: new THREE.TorusGeometry(0.6, 0.07, 6, 20), blob: new THREE.CircleGeometry(1, 20), body: new THREE.SphereGeometry(1, 16, 12),
+  block: new THREE.BoxGeometry(1.6, 1.5, 1.5), eye: new THREE.SphereGeometry(0.2, 8, 6), crown: new THREE.CylinderGeometry(0.5, 0.42, 0.4, 6, 1, true),
+  bar: new THREE.PlaneGeometry(1, 0.16), arrow: new THREE.BoxGeometry(0.09, 0.09, 0.7), shot: new THREE.SphereGeometry(0.24, 10, 8), shard: new THREE.IcosahedronGeometry(0.22),
+  beam: new THREE.BoxGeometry(0.09, 0.09, 1).translate(0, 0, 0.5), drone: new THREE.SphereGeometry(0.34, 14, 10), ring: new THREE.RingGeometry(0.94, 1, 48),
+};
+const mats = new Map();
+const mat = (color, glow = 0) => { const k = color + glow; if (!mats.has(k)) mats.set(k, new THREE.MeshStandardMaterial({ color, roughness: 0.65, flatShading: true, emissive: glow ? color : "#000", emissiveIntensity: glow })); return mats.get(k); };
+const shadowMat = new THREE.MeshBasicMaterial({ color: "#000", transparent: true, opacity: 0.22, depthWrite: false });
+function mesh(geo, material, x, y, z, parent) { const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); parent.add(m); return m; }
+function blobShadow(parent, r) { const s = mesh(G.blob, shadowMat, 0, 0.03, 0, parent); s.rotation.x = -Math.PI / 2; s.scale.setScalar(r); }
+
+/** A tower: a stone foot with the builder's color band, a body and a head that turns to aim. */
+function makeTower(t, level, colorIndex) {
+  const g = new THREE.Group(), head = new THREE.Group(), T = CONFIG.towers[t];
+  blobShadow(g, 1.0);
+  mesh(G.foot, mat("#a9a196"), 0, 0.2, 0, g); mesh(G.band, mat(COLORS[colorIndex % COLORS.length] || "#fff"), 0, 0.44, 0, g);
+  let top = 1.6;
+  if (t === 0) { mesh(G.post, mat("#9c6b3c"), 0, 1.0, 0, g); mesh(G.deck, mat("#7a5230"), 0, 1.6, 0, g); mesh(G.stock, mat("#5a3a20"), 0, 0, 0, head); mesh(G.bow, mat(T.color), 0, 0, 0.3, head); head.position.y = 1.85; top = 1.85; }
+  else if (t === 1) { mesh(G.drum, mat("#8d96a0"), 0, 0.8, 0, g); mesh(G.ball, mat("#3b4350"), 0, 0, 0, head); mesh(G.barrel, mat("#2b313a"), 0, 0.05, 0, head); head.position.y = 1.35; top = 1.4; }
+  else if (t === 2) { mesh(G.pillar, mat("#dff4fb"), 0, 1.0, 0, g); mesh(G.crystal, mat(T.color, 0.6), 0, 0, 0, head); head.position.y = 2.1; top = 2.1; head.userData.spin = true; }
+  else { mesh(G.spire, mat("#5b4a7a"), 0, 1.2, 0, g); mesh(G.orb, mat(T.color, 0.9), 0, 0, 0, head); const h = mesh(G.halo, mat("#e9d8ff", 0.5), 0, 0, 0, head); h.rotation.x = Math.PI / 2; head.position.y = 2.3; top = 2.3; head.userData.spin = true; }
+  for (let i = 1; i < level; i++) { const p = mesh(G.pip, mat("#ffd23f", 0.3), 0, 0.62 + i * 0.22, 0, g); p.rotation.x = Math.PI / 2; p.scale.setScalar(0.85 - i * 0.08); }
+  g.add(head); g.scale.setScalar(1 + (level - 1) * 0.1);
+  g.userData = { head, top: top * (1 + (level - 1) * 0.1) };
+  scene.add(g); return g;
+}
+const barMats = ["#ff5a5a", "#ffd23f", "#52d273"].map((c) => new THREE.MeshBasicMaterial({ color: c, depthWrite: false })), barBg = new THREE.MeshBasicMaterial({ color: "#1b2a40", depthWrite: false });
+/** An enemy: a round blob (a block for tanks, a crown for the boss) with eyes and an hp bar. */
+function makeEnemy(t) {
+  const E = CONFIG.enemies[t], g = new THREE.Group(), body = new THREE.Group(), r = E.size * TL * 0.52;
+  const skin = new THREE.MeshStandardMaterial({ color: E.color, roughness: 0.55, flatShading: true, emissive: "#5fd3f3", emissiveIntensity: 0 });
+  blobShadow(g, r * 1.1);
+  if (t === 2) mesh(G.block, skin, 0, 0, 0, body).scale.setScalar(r * 0.75); else mesh(G.body, skin, 0, 0, 0, body).scale.set(r, r * 0.9, r);
+  for (const s of [-1, 1]) { mesh(G.eye, mat("#ffffff"), s * r * 0.38, r * 0.25, r * 0.8, body).scale.setScalar(r * 0.9); mesh(G.eye, mat("#111111"), s * r * 0.38, r * 0.25, r * 0.95, body).scale.setScalar(r * 0.45); }
+  if (t === 3) mesh(G.crown, mat("#ffd23f", 0.4), 0, r * 1.05, 0, body).scale.setScalar(r);
+  body.position.y = r; g.add(body);
+  const bar = new THREE.Group(); bar.position.y = r * 2 + 0.5; g.add(bar);
+  const bg = mesh(G.bar, barBg, 0, 0, 0, bar), fg = mesh(G.bar, barMats[2], 0, 0, 0.01, bar);
+  bg.scale.set(1.3, 1.4, 1); fg.scale.x = 1.2;
+  g.userData = { body, bar, fg, skin, r };
+  scene.add(g); return g;
+}
+/** Another builder's cursor: a little drone in their color, with a name tag and a tile frame. */
+const frameTex = canvasTex(64, 64, (c) => { c.strokeStyle = "#fff"; c.lineWidth = 6; c.beginPath(); c.roundRect(4, 4, 56, 56, 10); c.stroke(); });
+function makeDrone(color, name) {
+  const g = new THREE.Group(), d = mesh(G.drone, mat(color, 0.35), 0, 2.6, 0, g);
+  const prop = mesh(G.halo, mat("#ffffff"), 0, 0.3, 0, d); prop.rotation.x = Math.PI / 2;
+  const frame = new THREE.Mesh(new THREE.PlaneGeometry(TL, TL), new THREE.MeshBasicMaterial({ map: frameTex, color, transparent: true, depthWrite: false }));
+  frame.rotation.x = -Math.PI / 2; frame.position.y = 0.04; g.add(frame);
+  if (name) {
+    const tex = canvasTex(256, 64, (c) => { c.font = "bold 32px system-ui"; c.textAlign = "center"; c.lineWidth = 6; c.strokeStyle = "#000a"; c.strokeText(name, 128, 44); c.fillStyle = "#fff"; c.fillText(name, 128, 44); });
+    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false })); tag.scale.set(4, 1, 1); tag.position.y = 3.5; g.add(tag);
+  }
+  scene.add(g); return { g, d, x: 0, z: 0, fresh: true };
+}
+// Particles: one instanced mesh of little cubes, recycled.
+const PMAX = 500, parts = [], dummy = new THREE.Object3D(), tmpColor = new THREE.Color();
+const pMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial(), PMAX);
+pMesh.setColorAt(0, tmpColor.set("#fff")); pMesh.count = 0; pMesh.frustumCulled = false; scene.add(pMesh);
+function burst(x, y, z, color, n = 10, speed = 4, size = 0.22) {
+  for (let i = 0; i < n && parts.length < PMAX; i++) {
+    const a = Math.random() * Math.PI * 2, u = Math.random();
+    parts.push({ x, y, z, vx: Math.cos(a) * speed * u, vy: speed * (0.5 + Math.random()), vz: Math.sin(a) * speed * u, life: 0, max: 0.4 + Math.random() * 0.4, size, color: new THREE.Color(color) });
+  }
+}
+function partsTick(dt) {
+  let n = 0;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i]; p.life += dt;
+    if (p.life >= p.max) { parts.splice(i, 1); continue; }
+    p.vy -= 12 * dt; p.x += p.vx * dt; p.y = Math.max(0.05, p.y + p.vy * dt); p.z += p.vz * dt;
+    dummy.position.set(p.x, p.y, p.z); dummy.scale.setScalar(p.size * (1 - p.life / p.max)); dummy.rotation.set(p.life * 6, p.life * 4, 0); dummy.updateMatrix();
+    pMesh.setMatrixAt(n, dummy.matrix); pMesh.setColorAt(n, p.color); n++;
+  }
+  pMesh.count = n; pMesh.instanceMatrix.needsUpdate = true; if (pMesh.instanceColor) pMesh.instanceColor.needsUpdate = true;
+}
+// Floating "+6" numbers over the board.
+const pops = [];
+function pop(x, y, z, text, color) {
+  if (pops.length > 24 || ATTRACT) return;
+  const el = document.createElement("div"); el.className = "pop"; el.textContent = text; el.style.color = color; document.body.appendChild(el);
+  pops.push({ el, p: new THREE.Vector3(x, y, z), t: 0 });
+}
+function popsTick(dt) {
+  for (let i = pops.length - 1; i >= 0; i--) {
+    const o = pops[i]; o.t += dt;
+    if (o.t > 0.9) { o.el.remove(); pops.splice(i, 1); continue; }
+    const s = o.p.clone().project(camera);
+    o.el.style.transform = `translate(${(s.x + 1) * innerWidth / 2 - 12}px, ${(1 - s.y) * innerHeight / 2 - 30 - o.t * 50}px)`; o.el.style.opacity = String(1 - o.t / 0.9);
+  }
+}
+
+// ── GAME (HOST) ─────────────────────────────────────────────────────────────────────
+const host = { g: null, towers: [], enemies: [], bots: new Map(), wasHost: false, dirtyG: false, dirtyT: false, lastG: 0, lastE: 0, lastB: 0, sentEmpty: true };
+const hosting = () => isHost() && host.g;
+const game = () => (hosting() ? host.g : shared("game", null));
+/** Every tower as [tileX, tileY, type, level, colorIndex]. */
+const towerList = () => (hosting() ? host.towers : shared("towers", []));
+/** Every enemy as { i, t, d (tiles along the path), hp, slow }. */
+const readEnemies = () => shared("enemies", { w: 0, l: [] }, (e) => ({ w: e.w, list: (e.l || []).map(([i, t, d, hp, s]) => ({ i, t, d: d / 100, hp, slow: !!s })) }));
+const enemyList = () => (hosting() ? { w: host.g.wave, list: host.enemies } : readEnemies());
+const towerAt = (cx, cy) => towerList().find((tw) => tw[0] === cx && tw[1] === cy);
+const buildable = (cx, cy) => inBoard(cx, cy) && !PATH_CELLS.has(cx + "," + cy) && !towerAt(cx, cy);
+const maxHp = (t, wave) => Math.round(CONFIG.enemies[t].hp * (1 + CONFIG.hpGrowth * (wave - 1) + CONFIG.hpCurve * (wave - 1) ** 2));
+function stats(t, level) { const T = CONFIG.towers[t], U = CONFIG.upgrade; return { ...T, dmg: T.dmg * U.dmg ** (level - 1), range: T.range + U.range * (level - 1), slowFor: (T.slowFor || 0) * (1 + 0.3 * (level - 1)) }; }
+const upCost = (t, level) => (level >= 3 ? 0 : Math.round(CONFIG.towers[t].cost * CONFIG.upgrade.cost[level - 1]));
+const spentOn = (t, level) => { let s = CONFIG.towers[t].cost; for (let l = 1; l < level; l++) s += upCost(t, l); return s; };
+const refund = (t, level) => Math.round(spentOn(t, level) * CONFIG.sellBack);
+const colorIndexOf = (id) => { const b = host.bots.get(id), c = b ? b.c : id === net.sessionId ? myColor : S.entities.players[id]?.c; return Math.max(0, COLORS.indexOf(c)); };
+
+function newGame() {
+  const g = host.g;
+  host.g = { id: (g?.id || 0) + 1, v: g?.v || 0, phase: "build", wave: 1, lives: CONFIG.lives, gold: CONFIG.startGold, nextAt: Date.now() + CONFIG.firstWaveMs, spawned: 0, spawnAt: 0, kills: 0, built: 0, endsAt: 0 };
+  host.towers = []; host.enemies = []; host.dirtyG = host.dirtyT = true;
+  for (const b of host.bots.values()) b.thinkAt = Date.now() + 3000;
+  if (ATTRACT) attractSetup();
+}
+/** Become host: take over the game exactly as state has it. */
+function adopt() {
+  host.g = parse(S.shared.game, null);
+  host.towers = parse(S.shared.towers, []);
+  host.enemies = readEnemies().list.map((e) => ({ i: e.i, t: e.t, d: e.d, hp: e.hp, su: 0 }));
+  host.bots.clear();
+  for (const b of parse(S.shared.bots, [])) host.bots.set(b.i, { id: b.i, n: b.n, c: b.c, x: b.x, z: b.z, goal: null, thinkAt: 0 });
+  if (!host.g) newGame();
+  host.dirtyG = true;
+}
+
+/** An intent from a player (or an AI builder, or the host's own click). The host checks it and applies it. */
+function applyIntent(type, m, from) {
+  const g = host.g; if (!g || !m) return;
+  if (type === "again") { if (g.phase === "over") newGame(); return; }
+  if (type === "go") { if (g.phase === "build") { g.nextAt = Date.now(); host.dirtyG = true; } return; }
+  if (g.phase === "over") return;
+  const x = m.x | 0, y = m.y | 0, tw = host.towers.find((w) => w[0] === x && w[1] === y);
+  if (type === "build" && CONFIG.towers[m.t | 0] && buildable(x, y) && g.gold >= CONFIG.towers[m.t | 0].cost) {
+    g.gold -= CONFIG.towers[m.t | 0].cost; g.built++; host.towers.push([x, y, m.t | 0, 1, colorIndexOf(from)]);
+  } else if (type === "upgrade" && tw && tw[3] < 3 && g.gold >= upCost(tw[2], tw[3])) {
+    g.gold -= upCost(tw[2], tw[3]); tw[3]++;
+  } else if (type === "sell" && tw) {
+    g.gold += refund(tw[2], tw[3]); host.towers = host.towers.filter((w) => w !== tw);
+  } else return;
+  host.dirtyG = host.dirtyT = true;
+}
+
+/** Damage one enemy (host only). Dead enemies pay their gold into the shared pot. */
+function hurt(e, dmg, st) {
+  if (!e || e.hp <= 0) return;
+  e.hp -= dmg;
+  if (st.slow) e.su = Date.now() + st.slowFor * 1000;
+  if (e.hp <= 0) { host.g.gold += CONFIG.enemies[e.t].gold; host.g.kills++; host.enemies = host.enemies.filter((o) => o !== e); host.dirtyG = true; }
+}
+function strike(st, e, at) {
+  if (!st.splash) return hurt(e, st.dmg, st);
+  for (const o of [...host.enemies]) { const p = pathPos(o.d); if (Math.hypot(p.x - at.x, p.z - at.z) <= st.splash * TL) hurt(o, o === e ? st.dmg : st.dmg * 0.6, st); }
+}
+
+function hostTick(dt, now) {
+  if (!host.wasHost) { host.wasHost = true; adopt(); }
+  const g = host.g, t = Date.now(), slowK = 1 - (CONFIG.towers.find((w) => w.slow)?.slow || 0);
+  if (g.phase === "build" && t >= g.nextAt) { Object.assign(g, { phase: "wave", spawned: 0, spawnAt: t }); host.dirtyG = true; }
+  if (g.phase === "wave") {
+    const spec = waveSpec(g.wave);
+    if (t - g.spawnAt > 1500) g.spawnAt = t; // a new host picks up the spawning without a burst
+    while (g.spawned < spec.length && t >= g.spawnAt) {
+      const ty = spec[g.spawned];
+      host.enemies.push({ i: g.spawned, t: ty, d: 0, hp: maxHp(ty, g.wave), su: 0 });
+      g.spawned++; g.spawnAt += CONFIG.enemies[ty].gap * 1000 * (ATTRACT ? 0.6 : 1); host.dirtyG = true;
+    }
+    for (const e of host.enemies) e.d += CONFIG.enemies[e.t].speed * (e.su > t ? slowK : 1) * dt;
+    for (const e of host.enemies.filter((e) => e.d >= PATH_LEN)) { g.lives -= CONFIG.enemies[e.t].lives || 1; host.enemies = host.enemies.filter((o) => o !== e); host.dirtyG = true; }
+    if (g.lives <= 0) { Object.assign(g, { lives: 0, phase: "over", endsAt: t + CONFIG.resultsMs }); host.enemies = []; }
+    else if (g.spawned >= spec.length && !host.enemies.length) { Object.assign(g, { gold: g.gold + CONFIG.waveBonus + g.wave * 5, wave: g.wave + 1, phase: "build", nextAt: t + CONFIG.betweenMs }); host.dirtyG = true; }
+  }
+  if (g.phase === "over" && t > g.endsAt) newGame();
+  botsTick(dt, t);
+  // Write what changed: the game at most 5/s, the enemies ~8/s, the bots ~5/s.
+  if (host.dirtyT) { host.dirtyT = false; net.setShared("towers", JSON.stringify(host.towers)); }
+  if (host.dirtyG && now - host.lastG > 200) { host.dirtyG = false; host.lastG = now; host.g.v++; net.setShared("game", JSON.stringify(host.g)); } // host.g: a new game may have just replaced g
+  if (now - host.lastE > 120 && (host.enemies.length || !host.sentEmpty)) {
+    host.lastE = now; host.sentEmpty = !host.enemies.length;
+    net.setShared("enemies", JSON.stringify({ w: host.g.wave, l: host.enemies.map((e) => [e.i, e.t, Math.round(e.d * 100), Math.ceil(e.hp), e.su > t ? 1 : 0]) }));
+  }
+  if (now - host.lastB > 200) { host.lastB = now; net.setShared("bots", JSON.stringify(botList().map((b) => ({ ...b, x: +b.x.toFixed(1), z: +b.z.toFixed(1) })))); }
+}
+
+/** AI builders: think every few seconds, glide their cursor to a good tile, then build or upgrade there. */
+function botsTick(dt, t) {
+  const want = Math.max(0, CONFIG.seats - humans().length);
+  while (host.bots.size < want) {
+    const used = new Set([...host.bots.values()].map((b) => b.n)), taken = new Set([myColor, ...Object.values(S.entities.players).map((p) => p.c), ...[...host.bots.values()].map((b) => b.c)]);
+    const id = "b" + Math.random().toString(36).slice(2, 6);
+    host.bots.set(id, { id, n: BOT_NAMES.find((n) => !used.has(n)) || "Bot", c: COLORS.find((c) => !taken.has(c)) || COLORS[5], x: 0, z: 0, goal: null, thinkAt: t + 2000 + host.bots.size * 1500 });
+  }
+  while (host.bots.size > want) host.bots.delete([...host.bots.keys()].pop());
+  for (const b of host.bots.values()) {
+    if (!b.goal && t > b.thinkAt) { b.goal = botPlan(b); b.thinkAt = t + (ATTRACT ? 900 : 2500) + Math.random() * 2500; }
+    const gx = b.goal ? cellX(b.goal.x) : Math.sin(t / 1700 + b.id.charCodeAt(1)) * 6, gz = b.goal ? cellZ(b.goal.y) : Math.cos(t / 2300 + b.id.charCodeAt(2)) * 4;
+    const dx = gx - b.x, dz = gz - b.z, d = Math.hypot(dx, dz), step = Math.min(d, (b.goal ? 14 : 3) * dt);
+    if (d > 0.01) { b.x += (dx / d) * step; b.z += (dz / d) * step; }
+    if (b.goal && d < 0.2) { applyIntent(b.goal.kind, b.goal, b.id); b.goal = null; }
+  }
+}
+function botPlan(b) {
+  const g = host.g; if (g.phase === "over") return null;
+  const money = g.gold - (ATTRACT ? 0 : CONFIG.botReserve * humans().length);
+  const others = [...host.bots.values()].filter((o) => o !== b && o.goal).map((o) => o.goal.x + "," + o.goal.y);
+  const ups = host.towers.filter((tw) => tw[3] < 3 && upCost(tw[2], tw[3]) <= money && !others.includes(tw[0] + "," + tw[1]));
+  if (ups.length && (Math.random() < 0.3 || host.towers.length >= 9)) {
+    const tw = ups.sort((p, q) => coverage(q[0], q[1], 2.5) - coverage(p[0], p[1], 2.5))[Math.floor(Math.random() * Math.min(3, ups.length))];
+    return { kind: "upgrade", x: tw[0], y: tw[1] };
+  }
+  // Pick the tower type the team has least of (against a target mix), if it can be afforded.
+  const mix = [0.4, 0.25, 0.15, 0.2], have = CONFIG.towers.map((_, i) => host.towers.filter((tw) => tw[2] === i).length), n = host.towers.length + 1;
+  const order = CONFIG.towers.map((_, i) => i).filter((i) => g.wave >= [1, 2, 2, 3][i] || ATTRACT).sort((p, q) => have[p] / n - (mix[p] || 0.2) - (have[q] / n - (mix[q] || 0.2)));
+  const t = order[0]; // save up for it rather than buying whatever is cheapest
+  if (t === undefined || CONFIG.towers[t].cost > money) return null;
+  const cells = [];
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (buildable(x, y) && !others.includes(x + "," + y)) cells.push({ x, y, s: coverage(x, y, CONFIG.towers[t].range) });
+  cells.sort((p, q) => q.s - p.s);
+  const c = cells[Math.floor(Math.random() * Math.min(4, cells.length))];
+  return c ? { kind: "build", x: c.x, y: c.y, t } : null;
+}
+function botList() {
+  if (hosting()) return [...host.bots.values()].map((b) => ({ i: b.id, n: b.n, c: b.c, x: b.x, z: b.z }));
+  return shared("bots", []);
+}
+/** ?attract: start mid-game with towers up and a wave already on the path. */
+function attractSetup() {
+  const g = host.g; Object.assign(g, { wave: 6, gold: 500, phase: "wave", spawned: 12, spawnAt: Date.now() + 300 });
+  for (const [x, y, t, l, c] of [[2, 3, 0, 2, 1], [5, 4, 1, 1, 2], [4, 7, 3, 1, 3], [8, 4, 2, 1, 4], [6, 1, 0, 2, 1], [9, 3, 1, 1, 2], [10, 5, 0, 1, 3]]) host.towers.push([x, y, t, l, c]);
+  const spec = waveSpec(g.wave);
+  for (let i = 0; i < 12; i++) host.enemies.push({ i, t: spec[i], d: 14 - i * 1.2, hp: maxHp(spec[i], g.wave), su: 0 });
+}
+
+// ── VIEW ────────────────────────────────────────────────────────────────────────────
+const tViews = new Map(), eViews = new Map(), drones = new Map(), shots = [], cool = new Map();
+let firstSync = true;
+function syncTowers(now) {
+  const seen = new Set();
+  for (const tw of towerList()) {
+    const key = tw[0] + "," + tw[1], sig = tw.join(","); seen.add(key);
+    let v = tViews.get(key);
+    if (v && v.sig !== sig) { scene.remove(v.g); v = null; burst(cellX(tw[0]), 2, cellZ(tw[1]), "#ffd23f", 18, 5); }
+    if (!v) {
+      v = { sig, g: makeTower(tw[2], tw[3], tw[4]), x: cellX(tw[0]), z: cellZ(tw[1]), born: firstSync ? 0 : now };
+      v.g.position.set(v.x, 0, v.z); tViews.set(key, v);
+      if (!firstSync) burst(v.x, 0.5, v.z, COLORS[tw[4]] || "#fff", 14, 4);
+    }
+    const k = Math.min(1, (now - v.born) / 350), s = k < 1 ? 1 + 2.7 * (k - 1) ** 3 + 1.7 * (k - 1) ** 2 : 1; // ease out, with a little overshoot
+    v.g.scale.setScalar((1 + (tw[3] - 1) * 0.1) * Math.max(0.2, s));
+    if (v.g.userData.head.userData.spin) v.g.userData.head.rotation.y += 0.02;
+  }
+  for (const [key, v] of tViews) if (!seen.has(key)) { scene.remove(v.g); tViews.delete(key); burst(v.x, 0.6, v.z, "#a9a196", 16, 4); }
+  firstSync = false;
+}
+let lastWaveKey = "";
+function syncEnemies(dt, g) {
+  const { w, list } = enemyList(), amHost = hosting(), age = amHost ? 0 : Math.min(0.5, (performance.now() - (memo.get("enemies")?.at || 0)) / 1000);
+  const slowK = 1 - (CONFIG.towers.find((x) => x.slow)?.slow || 0), seen = new Set(), t = Date.now();
+  for (const e of list) {
+    const key = g.id + "." + w + "." + e.i; seen.add(key);
+    let v = eViews.get(key);
+    const slowed = amHost ? e.su > t : e.slow, E = CONFIG.enemies[e.t];
+    const want = amHost ? e.d : Math.min(PATH_LEN, e.d + E.speed * (slowed ? slowK : 1) * age);
+    if (!v) { v = { key, t: e.t, d: want, g: makeEnemy(e.t), max: maxHp(e.t, w) }; eViews.set(key, v); }
+    v.d = amHost ? want : v.d + (want - v.d) * Math.min(1, dt * 8);
+    v.hp = e.hp; v.ref = amHost ? e : null;
+    const p = pathPos(v.d), u = v.g.userData;
+    v.x = p.x; v.z = p.z; v.g.position.set(p.x, 0, p.z);
+    v.g.rotation.y += Math.atan2(Math.sin(p.h - v.g.rotation.y), Math.cos(p.h - v.g.rotation.y)) * Math.min(1, dt * 10);
+    u.body.position.y = u.r + Math.abs(Math.sin(v.d * 5)) * u.r * 0.35;
+    u.skin.emissiveIntensity = slowed ? 0.55 : 0;
+    const pct = Math.max(0, Math.min(1, v.hp / v.max));
+    u.fg.scale.x = 1.2 * pct; u.fg.position.x = -0.6 * (1 - pct); u.fg.material = barMats[pct > 0.6 ? 2 : pct > 0.3 ? 1 : 0];
+    u.bar.visible = pct < 1 && !ATTRACT; u.bar.quaternion.copy(camera.quaternion).premultiply(v.g.quaternion.clone().invert());
+  }
+  for (const [key, v] of eViews) if (!seen.has(key)) {
+    scene.remove(v.g); eViews.delete(key);
+    if (g.phase !== "over" && v.d < PATH_LEN - 0.8) { burst(v.x, 0.6, v.z, CONFIG.enemies[v.t].color, 16, 5); pop(v.x, 1.5, v.z, "+" + CONFIG.enemies[v.t].gold, "#ffd23f"); }
+  }
+}
+/** Every client aims and fires its towers from the synced enemies; only the host's shots do damage. */
+function towersTick(dt, g) {
+  if (g.phase !== "wave") return;
+  const amHost = hosting();
+  for (const tw of towerList()) {
+    const key = tw[0] + "," + tw[1], left = (cool.get(key) ?? Math.random() * 0.4) - dt;
+    if (left > 0) { cool.set(key, left); continue; }
+    const st = stats(tw[2], tw[3]), x = cellX(tw[0]), z = cellZ(tw[1]);
+    let best = null;
+    for (const v of eViews.values()) if (Math.hypot(v.x - x, v.z - z) <= st.range * TL && (!best || v.d > best.d)) best = v;
+    cool.set(key, best ? st.every : 0);
+    if (best) fire(key, st, best, amHost);
+  }
+}
+function fire(key, st, target, amHost) {
+  const tv = tViews.get(key); if (!tv) return;
+  const head = tv.g.userData.head; if (!head.userData.spin) head.rotation.y = Math.atan2(target.x - tv.x, target.z - tv.z);
+  const from = new THREE.Vector3(tv.x, tv.g.userData.top, tv.z);
+  if (st.chain) { // lightning: instant, jumps to the nearest enemies
+    const hit = [target];
+    for (let k = 0; k < st.chain; k++) { const a = hit.at(-1); let nx = null, nd = 1.8 * TL; for (const v of eViews.values()) { const d = Math.hypot(v.x - a.x, v.z - a.z); if (!hit.includes(v) && d < nd) { nd = d; nx = v; } } if (!nx) break; hit.push(nx); }
+    let a = from;
+    for (const h of hit) { const b = new THREE.Vector3(h.x, 0.8, h.z); beam(a, b, st.color); burst(h.x, 0.8, h.z, "#e9d8ff", 6, 3, 0.15); a = b; if (amHost) hurt(h.ref, st.dmg, st); }
+    return;
+  }
+  const m = new THREE.Mesh(st.splash ? G.shot : st.slow ? G.shard : G.arrow, st.splash ? mat("#2b313a") : st.slow ? mat(st.color, 0.8) : mat("#5a3a20"));
+  m.position.copy(from); scene.add(m);
+  shots.push({ m, from, target, tx: target.x, tz: target.z, t: 0, dur: st.splash ? 0.55 : 0.25, arc: st.splash ? 2.2 : 0.2, st, amHost });
+}
+function beam(a, b, color) {
+  const m = new THREE.Mesh(G.beam, new THREE.MeshBasicMaterial({ color, transparent: true }));
+  m.position.copy(a); m.lookAt(b); m.scale.set(1.4, 1.4, a.distanceTo(b)); scene.add(m);
+  shots.push({ m, beam: true, t: 0, dur: 0.15 });
+}
+function shotsTick(dt) {
+  for (let i = shots.length - 1; i >= 0; i--) {
+    const s = shots[i]; s.t += dt / s.dur;
+    if (s.beam) { s.m.material.opacity = 1 - s.t; if (s.t >= 1) { scene.remove(s.m); s.m.material.dispose(); shots.splice(i, 1); } continue; }
+    if (eViews.get(s.target.key) === s.target) { s.tx = s.target.x; s.tz = s.target.z; }
+    const k = Math.min(1, s.t), x = s.from.x + (s.tx - s.from.x) * k, z = s.from.z + (s.tz - s.from.z) * k, y = s.from.y + (0.8 - s.from.y) * k + Math.sin(k * Math.PI) * s.arc;
+    s.m.lookAt(x, y, z); s.m.position.set(x, y, z);
+    if (s.t < 1) continue;
+    scene.remove(s.m); shots.splice(i, 1);
+    if (s.st.splash) { burst(x, 0.6, z, "#ff8c42", 22, 6, 0.3); burst(x, 0.6, z, "#ffd23f", 10, 4); }
+    else burst(x, 0.8, z, s.st.slow ? "#bff3ff" : "#fff3c4", 5, 3, 0.14);
+    if (s.amHost) strike(s.st, s.target.ref, { x, z });
+  }
+}
+function syncDrones(dt) {
+  const seen = new Set(), list = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    if (id === net.sessionId) continue;
+    const c = parse(p.cur, null); if (c && c.x >= 0) list.push({ i: id, n: p.n || "Player", c: p.c || "#ccc", x: cellX(c.x), z: cellZ(c.y) });
+  }
+  for (const b of botList()) list.push({ ...b, n: b.n + " (bot)" });
+  for (const o of list) {
+    seen.add(o.i);
+    let d = drones.get(o.i); if (!d) { d = makeDrone(o.c, ATTRACT ? "" : o.n); drones.set(o.i, d); }
+    if (d.fresh) { d.x = o.x; d.z = o.z; d.fresh = false; }
+    const k = 1 - Math.pow(0.0005, dt); d.x += (o.x - d.x) * k; d.z += (o.z - d.z) * k;
+    d.g.position.set(d.x, 0, d.z); d.d.position.y = 2.6 + Math.sin(performance.now() / 300 + d.x) * 0.15; d.d.rotation.y += dt * 8;
+  }
+  for (const [id, d] of drones) if (!seen.has(id)) { scene.remove(d.g); drones.delete(id); }
+}
+// My cursor: a tile frame, a see-through tower and its range.
+const myFrame = new THREE.Mesh(new THREE.PlaneGeometry(TL, TL), new THREE.MeshBasicMaterial({ map: frameTex, transparent: true, depthWrite: false }));
+myFrame.rotation.x = -Math.PI / 2; myFrame.position.y = 0.05; scene.add(myFrame);
+const myRange = new THREE.Mesh(G.ring, new THREE.MeshBasicMaterial({ color: "#fff", transparent: true, opacity: 0.55, depthWrite: false }));
+myRange.rotation.x = -Math.PI / 2; myRange.position.y = 0.06; scene.add(myRange);
+const ghost = new THREE.Mesh(G.pillar, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.45 })); scene.add(ghost);
+function cursorTick() {
+  const show = me.cx >= 0 && inBoard(me.cx, me.cy) && !ATTRACT, tw = show && towerAt(me.cx, me.cy), sel = me.sel && towerList().find((w) => w[0] + "," + w[1] === me.sel);
+  myFrame.visible = show; ghost.visible = show && buildable(me.cx, me.cy);
+  const g = game(), ok = show && (tw || (buildable(me.cx, me.cy) && g && g.gold >= CONFIG.towers[me.type].cost));
+  myFrame.material.color.set(ok ? myColor : "#ff4040"); myFrame.position.set(cellX(me.cx), 0.05, cellZ(me.cy));
+  ghost.position.set(cellX(me.cx), 1, cellZ(me.cy)); ghost.material.color.set(CONFIG.towers[me.type].color);
+  const ringOf = sel || (ghost.visible ? [me.cx, me.cy, me.type, 1] : tw);
+  myRange.visible = !!ringOf && !ATTRACT;
+  if (ringOf) { myRange.position.set(cellX(ringOf[0]), 0.06, cellZ(ringOf[1])); myRange.scale.setScalar(stats(ringOf[2], ringOf[3]).range * TL); }
+}
+
+// ── HUD & RESULTS ───────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const myName = (() => { try { return localStorage.getItem("mpa-name") || ""; } catch { return ""; } })() ||
+  ["Brave", "Clever", "Sunny", "Swift", "Lucky", "Mighty"][Math.floor(Math.random() * 6)] + " " + ["Otter", "Fox", "Badger", "Owl", "Panda", "Llama"][Math.floor(Math.random() * 6)];
+let myColor = COLORS[0]; // picked on join: the first color nobody in the room has
+const me = { cx: -1, cy: -1, type: 0, sel: null, lastSend: 0, sent: "", hintUntil: 0, built: false, lastLives: -1, gameId: -1 };
+let boardApi = null, boardFor = -1, toastTimer = 0;
+const bar = $("bar");
+CONFIG.towers.forEach((T, i) => {
+  const b = document.createElement("button");
+  b.innerHTML = `<i style="background:${T.color}"></i>${esc(T.name)}<small>● ${T.cost}</small>`;
+  b.onclick = () => { me.type = i; me.sel = null; };
+  bar.appendChild(b);
+});
+function toast(text) { $("toast").textContent = text; $("toast").style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => ($("toast").style.opacity = 0), 1400); }
+function banner(text) { const b = $("banner"); b.textContent = text; b.style.opacity = 1; setTimeout(() => (b.style.opacity = 0), 1300); }
+
+function hud(g) {
+  if (ATTRACT) { for (const id of ["stats", "team", "wave", "hint", "net"]) $(id).style.display = "none"; $("net").textContent = ""; bar.hidden = true; return; }
+  const t = Date.now(), spec = waveSpec(g.wave), left = spec.length - g.spawned + enemyList().list.length;
+  $("sWave").textContent = `Wave ${g.wave}`; $("sLives").textContent = `♥ ${g.lives}`; $("sGold").textContent = `● ${Math.floor(g.gold)}`;
+  $("waveTxt").textContent = g.phase === "build" ? `Wave ${g.wave} in ${Math.max(0, Math.ceil((g.nextAt - t) / 1000))}s` : g.phase === "wave" ? `${left} enemies left` : "";
+  $("go").hidden = g.phase !== "build";
+  [...bar.children].forEach((b, i) => { b.classList.toggle("on", i === me.type && !me.sel); b.classList.toggle("poor", g.gold < CONFIG.towers[i].cost); });
+  const sel = me.sel && towerList().find((w) => w[0] + "," + w[1] === me.sel);
+  if (me.sel && !sel) me.sel = null;
+  $("sel").hidden = !sel;
+  if (sel) {
+    const c = upCost(sel[2], sel[3]);
+    $("selName").textContent = `${CONFIG.towers[sel[2]].name} · Lv ${sel[3]}`;
+    $("up").textContent = c ? `Upgrade ● ${c}` : "Max level"; $("up").disabled = !c || g.gold < c;
+    $("sell").textContent = `Sell +${refund(sel[2], sel[3])}`;
+  }
+  const team = humans().map((id) => ({ n: id === net.sessionId ? myName + " (you)" : S.entities.players[id]?.n || "Player", c: id === net.sessionId ? myColor : S.entities.players[id]?.c || "#ccc" }));
+  for (const b of botList()) team.push({ n: b.n + " (bot)", c: b.c });
+  $("team").innerHTML = team.map((p) => `<div>${esc(p.n)}<i style="background:${esc(p.c)}"></i></div>`).join("");
+  const n = humans().length;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the enemies" : ""}`;
+  $("hint").style.opacity = performance.now() < me.hintUntil && !me.built ? 1 : 0;
+  $("over").hidden = g.phase !== "over";
+  if (g.phase === "over") {
+    $("overTitle").textContent = `The castle fell on wave ${g.wave}`;
+    $("overSub").textContent = `${g.kills} enemies stopped · ${g.built} towers built`;
+    $("overNext").textContent = `New game in ${Math.max(0, Math.ceil((g.endsAt - t) / 1000))}s`;
+    if (boardFor !== g.id) { boardFor = g.id; showBoard(g.wave); }
+  }
+}
+function showBoard(wave) {
+  const list = $("board");
+  if (!boardApi) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li>Loading…</li>";
+  boardApi.submit(wave).catch(() => null).then(() => boardApi.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>wave ${e.score}</span></li>`).join("") : "<li>No scores yet. Set the first.</li>";
+  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+}
+/** One-off effects when the game changes: a new game, a wave starting or cleared, lives lost. */
+function watchGame(g) {
+  if (me.gameId !== g.id) { me.gameId = g.id; me.sel = null; me.lastLives = g.lives; cool.clear(); for (const v of eViews.values()) scene.remove(v.g); eViews.clear(); }
+  const key = g.id + g.phase + g.wave;
+  if (key !== lastWaveKey) {
+    if (lastWaveKey && g.phase === "wave") banner(`Wave ${g.wave}`);
+    if (lastWaveKey && g.phase === "build" && g.wave > 1) { banner("Wave cleared!"); pop(castle.position.x, 4, castle.position.z, `+${CONFIG.waveBonus + (g.wave - 1) * 5}`, "#ffd23f"); }
+    lastWaveKey = key;
+  }
+  if (g.lives < me.lastLives) { castleHit = 1; burst(castle.position.x, 2, castle.position.z, "#ff5a5a", 14, 5); pop(castle.position.x, 4.5, castle.position.z, `-${me.lastLives - g.lives} ♥`, "#ff6b6b"); }
+  me.lastLives = g.lives;
+}
+let castleHit = 0;
+
+// ── INPUT ───────────────────────────────────────────────────────────────────────────
+const act = (type, data) => (isHost() ? applyIntent(type, data, net.sessionId) : net.send(type, data));
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hitP = new THREE.Vector3();
+function pick(e) { ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); return ray.ray.intersectPlane(ground, hitP) ? toCell(hitP.x, hitP.z) : null; }
+function tapTile(cx, cy) {
+  const g = game(); if (!g || g.phase === "over") return;
+  const tw = towerAt(cx, cy), key = cx + "," + cy;
+  if (tw) { me.sel = me.sel === key ? null : key; return; }
+  me.sel = null;
+  if (!buildable(cx, cy)) return;
+  if (g.gold < CONFIG.towers[me.type].cost) return toast("Not enough gold");
+  act("build", { x: cx, y: cy, t: me.type }); me.built = true;
+}
+const cv = renderer.domElement;
+cv.addEventListener("pointermove", (e) => { const c = pick(e); if (c) { me.cx = c.cx; me.cy = c.cy; } });
+cv.addEventListener("pointerdown", (e) => e.preventDefault());
+cv.addEventListener("pointerup", (e) => { const c = pick(e); if (c) { me.cx = c.cx; me.cy = c.cy; tapTile(c.cx, c.cy); } });
+$("go").onclick = () => act("go", {});
+$("again").onclick = () => act("again", {});
+$("up").onclick = () => { const [x, y] = (me.sel || "").split(",").map(Number); if (me.sel) act("upgrade", { x, y }); };
+$("sell").onclick = () => { const [x, y] = (me.sel || "").split(",").map(Number); if (me.sel) { act("sell", { x, y }); me.sel = null; } };
+addEventListener("keydown", (e) => {
+  const i = "1234".indexOf(e.key);
+  if (i >= 0 && CONFIG.towers[i]) { me.type = i; me.sel = null; }
+  else if (e.key === " ") { e.preventDefault(); act("go", {}); }
+  else if (e.key === "u" || e.key === "e") $("up").click();
+  else if (e.key === "x" || e.key === "Delete") $("sell").click();
+  else if (e.key === "Escape") me.sel = null;
+});
+document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
+function fit() {
+  renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+}
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+/** Frame the whole board: turned sideways on a tall screen so the long side runs up the phone. */
+function placeCamera(now) {
+  const tall = innerHeight > innerWidth, elev = ATTRACT ? 0.95 : 1.05, vf = (camera.fov * Math.PI) / 360, hf = Math.atan(Math.tan(vf) * camera.aspect);
+  const across = ((tall ? ROWS : COLS) + 2.5) * TL / 2, deep = ((tall ? COLS : ROWS) + 3.5) * TL / 2;
+  const dist = Math.max(across / Math.tan(hf), (deep * Math.sin(elev) + 2) / Math.tan(vf)) * (ATTRACT ? 0.62 : 1.05);
+  const az = (tall ? Math.PI / 2 : 0) + (ATTRACT ? Math.sin(now / 2600) * 0.25 : 0), look = ATTRACT ? new THREE.Vector3(-3 + Math.sin(now / 3000) * 2.5, 0, 0.5) : new THREE.Vector3(0, 0, tall ? 0 : 1.5);
+  camera.position.set(look.x + Math.sin(az) * Math.cos(elev) * dist, Math.sin(elev) * dist, look.z + Math.cos(az) * Math.cos(elev) * dist);
+  camera.lookAt(look);
+}
+/** The room's state can arrive just after we join: if someone (or a bot) already had my color, take a free one. */
+function fixMyColor() {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId), bots = botList();
+  if (!others.some(([id, p]) => p.c === myColor && id < net.sessionId) && !bots.some((b) => b.c === myColor)) return;
+  const taken = new Set([...others.map(([, p]) => p.c), ...bots.map((b) => b.c)]);
+  myColor = COLORS.find((c) => !taken.has(c)) || myColor; net.me.set("c", myColor);
+}
+let last = performance.now(), lastHb = 0, lastHud = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixMyColor(); }
+  if (isHost()) hostTick(dt, now); else host.wasHost = false;
+  const g = game();
+  placeCamera(now);
+  if (g) { watchGame(g); syncTowers(now); syncEnemies(dt, g); towersTick(dt, g); }
+  shotsTick(dt); syncDrones(dt); cursorTick(); partsTick(dt); popsTick(dt);
+  portal.rotation.z += dt * 1.5; portalCore.material.color.setHSL(0.75, 0.8, 0.08 + Math.sin(now / 200) * 0.04);
+  castleHit = Math.max(0, castleHit - dt * 2); castleMat.emissive.setRGB(castleHit, 0, 0);
+  const cur = JSON.stringify({ x: me.cx, y: me.cy, t: me.type });
+  if (cur !== me.sent && now - me.lastSend > 100) { me.sent = cur; me.lastSend = now; net.me.set("cur", cur); }
+  renderer.render(scene, camera);
+  if (g && now - lastHud > 150) { lastHud = now; hud(g); }
+  requestAnimationFrame(frame);
+}
+
+(async function start() {
+  if (ATTRACT) Object.assign(CONFIG, { seats: 4, betweenMs: 1500, firstWaveMs: 1000 });
+  net = await connect();
+  net.onState((st) => { S = st; });
+  for (const type of ["build", "upgrade", "sell", "go", "again"]) net.on(type, (m, from) => { if (isHost()) applyIntent(type, m || {}, from); });
+  net.onDisconnect(() => { $("net").textContent = "Reconnecting…"; });
+  if (!net.offline && typeof MP !== "undefined") boardApi = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
+  const taken = new Set([...Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c), ...parse(S.shared.bots, []).map((b) => b.c)]);
+  myColor = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
+  net.me.set({ n: myName, c: myColor, hb: Date.now() });
+  const touch = matchMedia("(pointer: coarse)").matches;
+  $("hint").textContent = `Pick a tower below, then ${touch ? "tap" : "click"} a free tile beside the path. The gold is shared with your team.`;
+  me.hintUntil = performance.now() + 14000;
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
