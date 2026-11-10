@@ -197,7 +197,9 @@ function livePlayers() {
   }
   return out.sort();
 }
-const isHost = () => livePlayers()[0] === net.sessionId;
+let frameAt = 0, wokeAt = -1e9; // my loop's last frame, and when it last woke from a stall (a frozen or background tab)
+/** Never while my own loop is stalled, nor for 0.7s after it wakes: the room moved on without me, so the newer state lands first. */
+const isHost = () => livePlayers()[0] === net.sessionId && performance.now() - frameAt < 1000 && performance.now() - wokeAt > 700;
 const humans = () => livePlayers().filter((id) => !(ATTRACT && id === net.sessionId));
 
 // ── BOARD ───────────────────────────────────────────────────────────────────────────
@@ -465,7 +467,7 @@ function hostTick(dt, now) {
   botsTick(dt, t);
   // Write what changed: the game at most 5/s, the enemies ~8/s, the bots ~5/s.
   if (host.dirtyT) { host.dirtyT = false; net.setShared("towers", JSON.stringify(host.towers)); }
-  if (host.dirtyG && now - host.lastG > 200) { host.dirtyG = false; host.lastG = now; host.g.v++; net.setShared("game", JSON.stringify(host.g)); } // host.g: a new game may have just replaced g
+  if (host.dirtyG && now - host.lastG > 200) { host.dirtyG = false; host.lastG = now; host.g.v = Math.max(host.g.v, shared("game", null)?.v || 0) + 1; net.setShared("game", JSON.stringify(host.g)); } // host.g: a new game may have just replaced g; v never goes below state's
   if (now - host.lastE > 120 && (host.enemies.length || !host.sentEmpty)) {
     host.lastE = now; host.sentEmpty = !host.enemies.length;
     net.setShared("enemies", JSON.stringify({ w: host.g.wave, l: host.enemies.map((e) => [e.i, e.t, Math.round(e.d * 100), Math.ceil(e.hp), e.su > t ? 1 : 0]) }));
@@ -776,6 +778,9 @@ function fixMyColor() {
 let last = performance.now(), lastHb = 0, lastHud = 0;
 function frame(now) {
   requestAnimationFrame(frame);
+  const t0 = performance.now(); // not `now`: the first frame after a freeze can be stamped from before it ended
+  if (frameAt && t0 - frameAt > 1000) { wokeAt = t0; host.wasHost = false; } // woke from a stall: drop my host copy, adopt state again (see isHost)
+  frameAt = t0;
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // never negative: the first frame can be stamped before `last`
   if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixMyColor(); }
   if (isHost()) hostTick(dt, now); else host.wasHost = false;
