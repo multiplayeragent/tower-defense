@@ -775,6 +775,7 @@ function fixMyColor() {
 }
 let last = performance.now(), lastHb = 0, lastHud = 0;
 function frame(now) {
+  requestAnimationFrame(frame);
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // never negative: the first frame can be stamped before `last`
   if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixMyColor(); }
   if (isHost()) hostTick(dt, now); else host.wasHost = false;
@@ -788,7 +789,6 @@ function frame(now) {
   if (cur !== me.sent && now - me.lastSend > 100) { me.sent = cur; me.lastSend = now; net.me.set("cur", cur); }
   renderer.render(scene, camera);
   if (g && now - lastHud > 150) { lastHud = now; hud(g); }
-  requestAnimationFrame(frame);
 }
 
 (async function start() {
