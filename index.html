@@ -32,7 +32,7 @@
   #up { background: #52d273; color: #06240f; } #sell { background: #ff8c42; color: #2b1200; } #up:disabled { opacity: .45; }
   #sel[hidden], #over[hidden], #bar[hidden] { display: none; }
   #over { position: fixed; inset: 0; display: grid; place-items: center; background: #0007; }
-  .card { width: min(360px, 88vw); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #1b2a40; border: 1px solid #ffffff2a; text-align: center; }
+  .card { box-sizing: border-box; width: min(402px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #1b2a40; border: 1px solid #ffffff2a; text-align: center; }
   .card h2 { margin: 0 0 4px; font-size: 22px; } .card h3 { margin: 14px 0 4px; font-size: 14px; color: #ffd23f; }
   .card ol { text-align: left; margin: 0 0 14px; padding-left: 26px; font-size: 14px; }
   .card li span { float: right; } .card p { margin: 6px 0; font-size: 14px; opacity: .85; }
@@ -379,7 +379,7 @@ function popsTick(dt) {
 
 // ── GAME (HOST) ─────────────────────────────────────────────────────────────────────
 const host = { g: null, towers: [], enemies: [], bots: new Map(), wasHost: false, dirtyG: false, dirtyT: false, lastG: 0, lastE: 0, lastB: 0, sentEmpty: true };
-const hosting = () => isHost() && host.g;
+const hosting = () => isHost() && host.wasHost && host.g; // wasHost: adopted (not leftovers from an earlier turn as host)
 const game = () => (hosting() ? host.g : shared("game", null));
 /** Every tower as [tileX, tileY, type, level, colorIndex]. */
 const towerList = () => (hosting() ? host.towers : shared("towers", []));
@@ -406,7 +406,9 @@ function newGame() {
 function adopt() {
   host.g = parse(S.shared.game, null);
   host.towers = parse(S.shared.towers, []);
-  host.enemies = readEnemies().list.map((e) => ({ i: e.i, t: e.t, d: e.d, hp: e.hp, su: 0 }));
+  // Pick the enemies up where this screen was drawing them (syncEnemies runs them on from the last write for up to 0.5s), so nothing snaps back.
+  const age = Math.min(0.5, (performance.now() - (memo.get("enemies")?.at || 0)) / 1000), slowK = 1 - (CONFIG.towers.find((w) => w.slow)?.slow || 0);
+  host.enemies = readEnemies().list.map((e) => ({ i: e.i, t: e.t, d: Math.min(PATH_LEN, e.d + CONFIG.enemies[e.t].speed * (e.slow ? slowK : 1) * age), hp: e.hp, su: 0 }));
   host.bots.clear();
   for (const b of parse(S.shared.bots, [])) host.bots.set(b.i, { id: b.i, n: b.n, c: b.c, x: b.x, z: b.z, goal: null, thinkAt: 0 });
   if (!host.g) newGame();
@@ -616,9 +618,9 @@ function shotsTick(dt) {
   }
 }
 function syncDrones(dt) {
-  const seen = new Set(), list = [];
+  const seen = new Set(), list = [], live = new Set(livePlayers()); // a closed tab's entity lingers ~30s: draw only live players
   for (const [id, p] of Object.entries(S.entities.players || {})) {
-    if (id === net.sessionId) continue;
+    if (id === net.sessionId || !live.has(id)) continue;
     const c = parse(p.cur, null); if (c && c.x >= 0) list.push({ i: id, n: p.n || "Player", c: p.c || "#ccc", x: cellX(c.x), z: cellZ(c.y) });
   }
   for (const b of botList()) list.push({ ...b, n: b.n + " (bot)" });
@@ -666,6 +668,7 @@ CONFIG.towers.forEach((T, i) => {
 function toast(text) { $("toast").textContent = text; $("toast").style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => ($("toast").style.opacity = 0), 1400); }
 function banner(text) { const b = $("banner"); b.textContent = text; b.style.opacity = 1; setTimeout(() => (b.style.opacity = 0), 1300); }
 
+let dropped = false; // true while the connection is down: the HUD keeps showing "Reconnecting…"
 function hud(g) {
   if (ATTRACT) { for (const id of ["stats", "team", "wave", "hint", "net"]) $(id).style.display = "none"; $("net").textContent = ""; bar.hidden = true; return; }
   const t = Date.now(), spec = waveSpec(g.wave), left = spec.length - g.spawned + enemyList().list.length;
@@ -686,7 +689,7 @@ function hud(g) {
   for (const b of botList()) team.push({ n: b.n + " (bot)", c: b.c });
   $("team").innerHTML = team.map((p) => `<div>${esc(p.n)}<i style="background:${esc(p.c)}"></i></div>`).join("");
   const n = humans().length;
-  $("net").textContent = net.offline ? "Offline: playing with bots" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the enemies" : ""}`;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : dropped ? "Reconnecting…" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the enemies" : ""}`;
   $("hint").style.opacity = performance.now() < me.hintUntil && !me.built ? 1 : 0;
   $("over").hidden = g.phase !== "over";
   if (g.phase === "over") {
@@ -772,7 +775,7 @@ function fixMyColor() {
 }
 let last = performance.now(), lastHb = 0, lastHud = 0;
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // never negative: the first frame can be stamped before `last`
   if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixMyColor(); }
   if (isHost()) hostTick(dt, now); else host.wasHost = false;
   const g = game();
@@ -793,7 +796,8 @@ function frame(now) {
   net = await connect();
   net.onState((st) => { S = st; });
   for (const type of ["build", "upgrade", "sell", "go", "again"]) net.on(type, (m, from) => { if (isHost()) applyIntent(type, m || {}, from); });
-  net.onDisconnect(() => { $("net").textContent = "Reconnecting…"; });
+  net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { dropped = false; });
   if (!net.offline && typeof MP !== "undefined") boardApi = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
   const taken = new Set([...Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c), ...parse(S.shared.bots, []).map((b) => b.c)]);
   myColor = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
