@@ -36,6 +36,7 @@
   .card h2 { margin: 0 0 4px; font-size: 22px; } .card h3 { margin: 14px 0 4px; font-size: 14px; color: #ffd23f; }
   .card ol { text-align: left; margin: 0 0 14px; padding-left: 26px; font-size: 14px; }
   .card li span { float: right; } .card p { margin: 6px 0; font-size: 14px; opacity: .85; }
+  .card li.note { list-style: none; margin-left: -26px; opacity: .8; } /* a status line, not a numbered entry */
   button.go { width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: #52d273; color: #06240f; font: 800 17px system-ui, sans-serif; cursor: pointer; }
   @media (max-width: 640px) { #wave { left: max(14px, env(safe-area-inset-left)); transform: none; top: calc(max(12px, env(safe-area-inset-top)) + 52px); font-size: 16px; } #stats { font-size: 18px; } }
 </style>
@@ -54,7 +55,7 @@
 <div id="bar"></div>
 <div id="over" hidden><div class="card">
   <h2 id="overTitle"></h2><p id="overSub"></p>
-  <h3>Furthest waves</h3><ol id="board"><li>Loading…</li></ol>
+  <h3>Furthest waves</h3><ol id="board"><li class="note">Loading…</li></ol>
   <button class="go" id="again">Play again</button><p id="overNext"></p>
 </div></div>
 <script type="module">
@@ -675,7 +676,7 @@ function hud(g) {
   if (ATTRACT) { for (const id of ["stats", "team", "wave", "hint", "net"]) $(id).style.display = "none"; $("net").textContent = ""; bar.hidden = true; return; }
   const t = Date.now(), spec = waveSpec(g.wave), left = spec.length - g.spawned + enemyList().list.length;
   $("sWave").textContent = `Wave ${g.wave}`; $("sLives").textContent = `♥ ${g.lives}`; $("sGold").textContent = `● ${Math.floor(g.gold)}`;
-  $("waveTxt").textContent = g.phase === "build" ? `Wave ${g.wave} in ${Math.max(0, Math.ceil((g.nextAt - t) / 1000))}s` : g.phase === "wave" ? `${left} enemies left` : "";
+  $("waveTxt").textContent = g.phase === "build" ? `Wave ${g.wave} in ${Math.max(0, Math.ceil((g.nextAt - t) / 1000))}s` : g.phase === "wave" ? `${left} ${left === 1 ? "enemy" : "enemies"} left` : "";
   $("go").hidden = g.phase !== "build";
   [...bar.children].forEach((b, i) => { b.classList.toggle("on", i === me.type && !me.sel); b.classList.toggle("poor", g.gold < CONFIG.towers[i].cost); });
   const sel = me.sel && towerList().find((w) => w[0] + "," + w[1] === me.sel);
@@ -696,18 +697,18 @@ function hud(g) {
   $("over").hidden = g.phase !== "over";
   if (g.phase === "over") {
     $("overTitle").textContent = `The castle fell on wave ${g.wave}`;
-    $("overSub").textContent = `${g.kills} enemies stopped · ${g.built} towers built`;
+    $("overSub").textContent = `${g.kills} ${g.kills === 1 ? "enemy" : "enemies"} stopped · ${g.built} tower${g.built === 1 ? "" : "s"} built`;
     $("overNext").textContent = `New game in ${Math.max(0, Math.ceil((g.endsAt - t) / 1000))}s`;
     if (boardFor !== g.id) { boardFor = g.id; showBoard(g.wave); }
   }
 }
 function showBoard(wave) {
   const list = $("board");
-  if (!boardApi) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
-  list.innerHTML = "<li>Loading…</li>";
+  if (!boardApi) { list.innerHTML = "<li class='note'>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li class='note'>Loading…</li>";
   boardApi.submit(wave).catch(() => null).then(() => boardApi.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>wave ${e.score}</span></li>`).join("") : "<li>No scores yet. Set the first.</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>wave ${e.score}</span></li>`).join("") : "<li class='note'>No scores yet. Set the first.</li>";
+  }).catch(() => { list.innerHTML = "<li class='note'>Couldn't load the leaderboard.</li>"; });
 }
 /** One-off effects when the game changes: a new game, a wave starting or cleared, lives lost. */
 function watchGame(g) {
@@ -739,17 +740,18 @@ function tapTile(cx, cy) {
 const cv = renderer.domElement;
 cv.addEventListener("pointermove", (e) => { const c = pick(e); if (c) { me.cx = c.cx; me.cy = c.cy; } });
 cv.addEventListener("pointerdown", (e) => e.preventDefault());
-cv.addEventListener("pointerup", (e) => { const c = pick(e); if (c) { me.cx = c.cx; me.cy = c.cy; tapTile(c.cx, c.cy); } });
+cv.addEventListener("contextmenu", (e) => e.preventDefault());
+cv.addEventListener("pointerup", (e) => { if (e.button > 0) return; const c = pick(e); if (c) { me.cx = c.cx; me.cy = c.cy; tapTile(c.cx, c.cy); } }); // only the left button (or a tap) builds
 $("go").onclick = () => act("go", {});
 $("again").onclick = () => act("again", {});
 $("up").onclick = () => { const [x, y] = (me.sel || "").split(",").map(Number); if (me.sel) act("upgrade", { x, y }); };
 $("sell").onclick = () => { const [x, y] = (me.sel || "").split(",").map(Number); if (me.sel) { act("sell", { x, y }); me.sel = null; } };
 addEventListener("keydown", (e) => {
-  const i = "1234".indexOf(e.key);
+  const i = ["Digit1", "Digit2", "Digit3", "Digit4"].indexOf(e.code), key = e.key.toLowerCase(); // e.code and lowercase: Shift and Caps Lock don't break the keys
   if (i >= 0 && CONFIG.towers[i]) { me.type = i; me.sel = null; }
   else if (e.key === " ") { e.preventDefault(); act("go", {}); }
-  else if (e.key === "u" || e.key === "e") $("up").click();
-  else if (e.key === "x" || e.key === "Delete") $("sell").click();
+  else if (key === "u" || key === "e") $("up").click();
+  else if (key === "x" || e.key === "Delete") $("sell").click();
   else if (e.key === "Escape") me.sel = null;
 });
 document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
